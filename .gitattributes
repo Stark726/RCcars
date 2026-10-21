@@ -1,1 +1,2 @@
 *.sqlite3 binary
+*.sh text eol=lf

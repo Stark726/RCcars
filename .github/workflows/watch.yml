@@ -1,22 +1,25 @@
 name: watch
 
 on:
+  # Backup only: each run starts the next one itself (see the last step), because
+  # GitHub's timer is often late or skipped. This restarts the chain if it breaks.
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/20 * * * *"
   workflow_dispatch:
 
-# One monitor at a time; a late run waits instead of overlapping and duplicating alerts.
+# One monitor at a time; a waiting run never overlaps a running one.
 concurrency:
   group: mattel-watch
   cancel-in-progress: false
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v5
 
@@ -38,27 +41,40 @@ jobs:
       - name: Install Chromium
         run: python -m playwright install --with-deps chromium
 
+      - name: Set git identity for state commits
+        run: |
+          git config user.name "mattel-watch-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       # One-time switch when deploy/github-config.json changes collections; a no-op otherwise.
       - name: Apply collection changes
         run: python -m mattel_watch.cli rescope --config deploy/github-config.json
 
-      # Runs the normal loop for about 4.5 minutes, so launch windows still get
-      # 10-second checks, then stops cleanly (Ctrl+C) and saves state.
+      # About 55 minutes of monitoring in 5-minute rounds. Each round stops cleanly
+      # (Ctrl+C) and saves state, so a crash loses at most one round.
       - name: Watch
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: timeout --preserve-status -s INT 270 python -m mattel_watch.cli run --config deploy/github-config.json
+        run: |
+          echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
+          for round in $(seq 1 11); do
+            echo "::group::Round $round"
+            timeout --preserve-status -s INT 290 python -m mattel_watch.cli run --config deploy/github-config.json || echo "Round $round exited with $?"
+            bash deploy/save_state.sh
+            echo "::endgroup::"
+          done
 
-      # Saves alert history so the next run never re-alerts. Runs even after a failed watch step.
       - name: Save state
         if: always()
+        run: bash deploy/save_state.sh
+
+      # Start the next run straight away. Skipped when this run ended early (for example a
+      # bad token), so a failing setup cannot loop; the backup timer retries later.
+      - name: Start next run
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          python -c "import sqlite3; db = sqlite3.connect('state/state.sqlite3'); db.execute('PRAGMA wal_checkpoint(TRUNCATE)'); db.close()"
-          git config user.name "mattel-watch-bot"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if ! python deploy/state_changed.py; then exit 0; fi
-          git add state/state.sqlite3
-          if git diff --cached --quiet; then echo "No state change"; exit 0; fi
-          git commit -m "Update watch state [skip ci]"
-          git push
+          if [ $(( $(date +%s) - STARTED )) -lt 1800 ]; then echo "Run was short; not chaining"; exit 0; fi
+          gh workflow run watch.yml --ref main
