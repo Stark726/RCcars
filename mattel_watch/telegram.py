@@ -82,6 +82,24 @@ def summary_message(observed, stats, launches):
     return "\n".join(lines)
 
 
+CART_QUANTITY = 2
+
+
+def cart_link(product, variant_id, quantity=CART_QUANTITY):
+    """Shopify cart permalink: opens the tapper's own checkout with the units already added."""
+    store = product.url.split("/products/", 1)[0]
+    return f"{store}/cart/{variant_id}:{quantity}"
+
+
+def buttons(product):
+    rows = [[{"text": "Open product", "url": product.url}]]
+    variants = [v for v in product.variants if re.fullmatch(r"[0-9]+", v.id)][:3]
+    for v in variants:
+        label = f"🛒 Add {CART_QUANTITY} to cart" + ("" if len(variants) == 1 else f" · {v.title[:30]}")
+        rows.append([{"text": label, "url": cart_link(product, v.id)}])
+    return {"inline_keyboard": rows}
+
+
 class Telegram:
     def __init__(self, token, chat_id, http):
         if not re.fullmatch(r"[0-9]+:[A-Za-z0-9_-]{20,}", token or ""):
@@ -106,7 +124,7 @@ class Telegram:
 
     def send(self, product, purchase_state, detail):
         payload = {"chat_id": self.chat_id, "text": message(product, purchase_state, detail), "parse_mode": "HTML",
-                   "reply_markup": {"inline_keyboard": [[{"text": "Open product", "url": product.url}]]}}
+                   "reply_markup": buttons(product)}
         if product.image:
             payload["link_preview_options"] = {"url": product.image, "prefer_large_media": True}
         result = self._call("sendMessage", payload)
@@ -117,11 +135,11 @@ class Telegram:
     def edit(self, message_id, product, purchase_state, detail):
         self._call("editMessageText", {"chat_id": self.chat_id, "message_id": message_id,
                    "text": message(product, purchase_state, detail), "parse_mode": "HTML",
-                   "reply_markup": {"inline_keyboard": [[{"text": "Open product", "url": product.url}]]}})
+                   "reply_markup": buttons(product)})
 
     def notify(self, reply_to, product, detail=""):
         payload = {"chat_id": self.chat_id, "text": ready_message(product, detail), "parse_mode": "HTML",
-                   "reply_markup": {"inline_keyboard": [[{"text": "Open product", "url": product.url}]]}}
+                   "reply_markup": buttons(product)}
         if reply_to:
             payload["reply_parameters"] = {"message_id": reply_to, "allow_sending_without_reply": True}
         self._call("sendMessage", payload)
@@ -132,7 +150,7 @@ class Telegram:
 
     def remind(self, reply_to, product, minutes):
         payload = {"chat_id": self.chat_id, "text": reminder_message(product, minutes), "parse_mode": "HTML",
-                   "reply_markup": {"inline_keyboard": [[{"text": "Open product", "url": product.url}]]}}
+                   "reply_markup": buttons(product)}
         if reply_to:
             payload["reply_parameters"] = {"message_id": reply_to, "allow_sending_without_reply": True}
         self._call("sendMessage", payload)
