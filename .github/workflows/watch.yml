@@ -19,7 +19,7 @@ permissions:
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v5
 
@@ -59,19 +59,24 @@ jobs:
           python -m mattel_watch.cli daily-summary --config deploy/github-config.json
           bash deploy/save_state.sh
 
-      # About 10 minutes of monitoring in two 5-minute rounds. Each round stops cleanly
-      # (Ctrl+C) and saves state, so a crash loses at most one round.
+      # About 10 minutes of monitoring in two 5-minute rounds, extended (up to 8 rounds)
+      # while a known launch is within 15 minutes, so no launch falls in the gap between
+      # runs. Each round stops cleanly (Ctrl+C) and saves state, so a crash loses at most one round.
       - name: Watch
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           echo "STARTED=$(date +%s)" >> "$GITHUB_ENV"
-          for round in 1 2; do
+          round=1
+          while true; do
             echo "::group::Round $round"
             timeout --preserve-status -s INT 290 python -m mattel_watch.cli run --config deploy/github-config.json || echo "Round $round exited with $?"
             bash deploy/save_state.sh
             echo "::endgroup::"
+            if [ "$round" -ge 8 ]; then break; fi
+            if [ "$round" -ge 2 ] && ! python deploy/launch_soon.py; then break; fi
+            round=$((round + 1))
           done
 
       - name: Save state
