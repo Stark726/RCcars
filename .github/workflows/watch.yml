@@ -50,6 +50,15 @@ jobs:
       - name: Apply collection changes
         run: python -m mattel_watch.cli rescope --config deploy/github-config.json
 
+      # At most one summary per day; saved immediately so a later crash cannot repeat it.
+      - name: Daily summary
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -m mattel_watch.cli daily-summary --config deploy/github-config.json
+          bash deploy/save_state.sh
+
       # About 10 minutes of monitoring in two 5-minute rounds. Each round stops cleanly
       # (Ctrl+C) and saves state, so a crash loses at most one round.
       - name: Watch

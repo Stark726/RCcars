@@ -12,5 +12,6 @@
   "discovery_poll_seconds": 300,
   "baseline_recheck_seconds": 21600,
   "summary_hour_utc": 13,
-  "health_failures_before_alert": 3
+  "health_failures_before_alert": 3,
+  "summary_in_scan": false
 }

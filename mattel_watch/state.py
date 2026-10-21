@@ -295,8 +295,8 @@ class State:
         return added
 
     def daily_stats(self):
-        new = [Product.from_json(json.loads(r[0])).title for r in self.db.execute(
-            "SELECT payload FROM products WHERE baseline=0 AND first_seen >= datetime('now','-1 day') ORDER BY first_seen")]
+        new = [(p.title, p.url) for p in (Product.from_json(json.loads(r[0])) for r in self.db.execute(
+            "SELECT payload FROM products WHERE baseline=0 AND first_seen >= datetime('now','-1 day') ORDER BY first_seen"))]
         listed = self.db.execute("SELECT count(*) FROM products WHERE last_seen >= datetime('now','-1 day')").fetchone()[0]
         waiting = self.db.execute("SELECT count(*) FROM products WHERE purchase_state='pending'").fetchone()[0]
         return {'listed': listed, 'new': new, 'waiting': waiting}

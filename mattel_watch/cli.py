@@ -63,7 +63,7 @@ def demo():
 
 def main():
     parser = argparse.ArgumentParser(description='Mattel Hot Wheels RLC + Premium monitor (Canada)')
-    parser.add_argument('command', choices=['demo','scan','run','doctor','status','telegram-test','telegram-chats','watch','discover','rescope'])
+    parser.add_argument('command', choices=['demo','scan','run','doctor','status','telegram-test','telegram-chats','watch','discover','rescope','daily-summary'])
     parser.add_argument('--config', default='config.json')
     parser.add_argument('--console', action='store_true', help='Offline notification preview; use a separate state file')
     parser.add_argument('--product-url', help='Exact Mattel product URL for doctor, discover, status or watch')
@@ -178,6 +178,9 @@ def main():
                 engine = Engine(cfg, state, ShopifyCatalog(cfg, JsonHTTP()), notifier)
                 if args.command == 'discover':
                     print(json.dumps(engine.discover_product(handle), indent=2), flush=True)
+                    return
+                if args.command == 'daily-summary':
+                    print(json.dumps({'daily_summary_sent': engine.maybe_daily_summary()}), flush=True)
                     return
                 delay = cfg.interval_seconds
                 catalogue_due = time.monotonic()

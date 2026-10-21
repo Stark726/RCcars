@@ -47,7 +47,8 @@ class Engine:
         self.record_scan_success()
         self.scan_launches()
         self.scan_discovery()
-        self.maybe_daily_summary(summary['observed'])
+        if self.cfg.summary_in_scan:
+            self.maybe_daily_summary(summary['observed'])
         summary['active_launch_watches']=sum(not self._watch_finished(w) for w in self.state.watches())
         summary['baseline_pages_unchecked']=self.state.audit_unchecked()
         return summary
@@ -238,12 +239,13 @@ class Engine:
             self.state.mark_reminded(watch['handle'], p.launch_at)
 
     def _post(self, text):
+        """True when posted, or possibly posted: an ambiguous timeout is never resent, so it cannot double."""
         try:
             self.notifier.post(text)
             return True
-        except DeliveryError:
-            log.warning('Telegram status post failed; retried later')
-            return False
+        except DeliveryError as exc:
+            log.warning('Telegram status post %s', 'may have been sent; not resent' if exc.ambiguous else 'failed; retried later')
+            return exc.ambiguous
 
     def record_scan_failure(self, reason):
         failures = int(self.state.get_setting('health_failures') or 0) + 1
@@ -258,16 +260,20 @@ class Engine:
         if self.state.get_setting('health_failures') not in (None, '0'):
             self.state.set_setting('health_failures', '0')
 
-    def maybe_daily_summary(self, observed):
+    def maybe_daily_summary(self, observed=None):
+        """Post at most one summary per UTC day, after summary_hour_utc. Returns True when posted."""
         now = self.clock()
         today = now.date().isoformat()
         if now.hour < self.cfg.summary_hour_utc or self.state.get_setting('summary_date') == today:
-            return
+            return False
         launches = sorted((launch_time(w['launch_at']), self.state.product(w['product_id']).title)
                           for w in self.state.watches()
                           if w['product_id'] and not self._watch_finished(w) and launch_time(w['launch_at']) > now)
-        if self._post(summary_message(observed, self.state.daily_stats(), launches)):
+        stats = self.state.daily_stats()
+        if self._post(summary_message(stats['listed'] if observed is None else observed, stats, launches)):
             self.state.set_setting('summary_date', today)
+            return True
+        return False
 
     def scan_discovery(self):
         """Audit old baseline pages in the background; new products inspect immediately."""

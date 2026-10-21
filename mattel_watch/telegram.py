@@ -70,7 +70,7 @@ def health_message(down, failures=0, reason=""):
 def summary_message(observed, stats, launches):
     lines = ["✅ <b>Mattel Watch daily check</b>", f"Products listed: {observed}",
              f"New in the last 24 h: {len(stats['new'])}"]
-    lines += [f"• {escape(title[:120])}" for title in stats['new'][:8]]
+    lines += [f'• <a href="{escape(url, quote=True)}">{escape(title[:120])}</a>' for title, url in stats['new'][:8]]
     if len(stats['new']) > 8:
         lines.append(f"• …and {len(stats['new']) - 8} more")
     lines.append(f"Waiting for stock or launch: {stats['waiting']}")

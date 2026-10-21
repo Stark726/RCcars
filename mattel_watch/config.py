@@ -34,6 +34,8 @@ class Config:
     baseline_recheck_seconds: int = 21600
     summary_hour_utc: int = 13
     health_failures_before_alert: int = 3
+    # False when a separate `daily-summary` step sends it (GitHub), so it is saved at once.
+    summary_in_scan: bool = True
 
     @classmethod
     def load(cls, path: str | Path) -> "Config":
@@ -76,6 +78,8 @@ class Config:
             raise ValueError('summary_hour_utc must be an hour from 0 to 23')
         if type(self.health_failures_before_alert) is not int or not 1 <= self.health_failures_before_alert <= 50:
             raise ValueError('health_failures_before_alert must be between 1 and 50')
+        if not isinstance(self.summary_in_scan, bool):
+            raise ValueError('summary_in_scan must be true or false')
         handles = set()
         for watch in self.launch_watches:
             if not isinstance(watch, dict) or set(watch) != {'handle', 'launch_at'}:
