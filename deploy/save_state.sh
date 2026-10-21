@@ -6,4 +6,8 @@ if ! python deploy/state_changed.py; then exit 0; fi
 git add state/state.sqlite3
 if git diff --cached --quiet; then echo "No state change"; exit 0; fi
 git commit -q -m "Update watch state [skip ci]"
-git push -q || echo "State push failed; it is retried after the next round"
+# A code push during this run makes the plain push fail; rebase onto it (code and state
+# never touch the same file) and push again, so the run's state is not lost.
+if ! git push -q; then
+  git pull -q --rebase origin main && git push -q || echo "State push failed; it is retried after the next round"
+fi
