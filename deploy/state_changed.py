@@ -14,11 +14,12 @@ from pathlib import Path
 
 STATE = "state/state.sqlite3"
 REFRESH_SECONDS = 6 * 3600
-QUERIES = (
-    "SELECT key, value FROM settings ORDER BY key",
-    "SELECT id, baseline, alert_state, alert_id, purchase_state, detail, revision, edited_revision "
-    "FROM products ORDER BY id",
-    "SELECT handle, launch_at, product_id, enabled, phase, source, reminded_for FROM launch_watches ORDER BY handle",
+# Columns that matter; timing columns (last_seen, check_after, next_check) are left out.
+TABLES = (
+    ("settings", ("key", "value"), "key"),
+    ("products", ("id", "baseline", "alert_state", "alert_id", "purchase_state", "detail",
+                  "revision", "edited_revision"), "id"),
+    ("launch_watches", ("handle", "launch_at", "product_id", "enabled", "phase", "source", "reminded_for"), "handle"),
 )
 
 
@@ -26,8 +27,11 @@ def digest(path):
     db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
         h = hashlib.sha256()
-        for query in QUERIES:
-            for row in db.execute(query):
+        for table, wanted, order in TABLES:
+            # An older committed database may lack newer columns; a missing column reads as NULL.
+            present = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+            columns = ", ".join(c if c in present else "NULL" for c in wanted)
+            for row in db.execute(f"SELECT {columns} FROM {table} ORDER BY {order}"):
                 h.update(repr(tuple(row)).encode())
         return h.hexdigest()
     finally:
@@ -55,4 +59,8 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception as exc:  # Never skip a save because this check failed.
+        print(f"State check failed ({type(exc).__name__}: {exc}); committing to be safe")
+        sys.exit(0)
