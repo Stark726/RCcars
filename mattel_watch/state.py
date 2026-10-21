@@ -46,6 +46,9 @@ class State:
         ''')
         if 'source' not in {row[1] for row in self.db.execute('PRAGMA table_info(launch_watches)')}:
             self.db.execute("ALTER TABLE launch_watches ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+        if 'reminded_for' not in {row[1] for row in self.db.execute('PRAGMA table_info(launch_watches)')}:
+            # Launch time a reminder was sent for; a rescheduled launch gets a new reminder.
+            self.db.execute("ALTER TABLE launch_watches ADD COLUMN reminded_for TEXT")
         self.db.commit()
 
     @contextmanager
@@ -260,6 +263,43 @@ class State:
                 'inspection_next_check': inspection['next_check'] if inspection else None,
                 'launch_watch': dict(watch) if watch else None,
                 'queue_position': position, 'priority': discovery_hint(p)}
+
+    def get_setting(self, key):
+        row = self.db.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_setting(self, key, value):
+        with self.db:
+            self.db.execute('INSERT INTO settings VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, value))
+
+    def mark_reminded(self, handle, launch_at):
+        with self.db:
+            self.db.execute('UPDATE launch_watches SET reminded_for=? WHERE handle=?', (launch_at, handle))
+
+    def rescope(self, products, scope):
+        """Switch to a new catalogue scope without alerting what is already listed.
+
+        Products not saved yet become baseline (no alert). Existing rows, alert IDs
+        and watches are kept, so earlier history and pending launches carry over.
+        """
+        if not products:
+            raise ValueError('Cannot rescope from an empty snapshot')
+        added = 0
+        with self.transaction():
+            for p in products:
+                if self.row(p.id) is None:
+                    self.db.execute("INSERT INTO products (id,payload,baseline,alert_state,purchase_state) VALUES (?,?,1,'ignored','baseline')",
+                                    (p.id, json.dumps(p.to_json(), ensure_ascii=False)))
+                    added += 1
+            self.db.execute("INSERT INTO settings VALUES ('scope', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (scope,))
+        return added
+
+    def daily_stats(self):
+        new = [Product.from_json(json.loads(r[0])).title for r in self.db.execute(
+            "SELECT payload FROM products WHERE baseline=0 AND first_seen >= datetime('now','-1 day') ORDER BY first_seen")]
+        listed = self.db.execute("SELECT count(*) FROM products WHERE last_seen >= datetime('now','-1 day')").fetchone()[0]
+        waiting = self.db.execute("SELECT count(*) FROM products WHERE purchase_state='pending'").fetchone()[0]
+        return {'listed': listed, 'new': new, 'waiting': waiting}
 
     def update_auto_time(self, handle, at):
         with self.db:

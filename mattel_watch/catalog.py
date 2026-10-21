@@ -1,5 +1,5 @@
 """Read-only Shopify catalogue adapter. HTTP 403/challenges stop the scan."""
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 import re
 from .http import TransportError
 from .models import Product, Variant
@@ -80,7 +80,8 @@ class ShopifyCatalog:
             if not isinstance(raw, dict) or not isinstance(raw.get("variants"), list) or not raw["variants"]:
                 raise CatalogError("Product has no valid variants; scan rejected")
             handle = raw["handle"]
-            if not isinstance(handle, str) or not re.fullmatch(r"[a-zA-Z0-9-]+", handle):
+            # Store handles can contain symbols such as ®; anything that could change the path is rejected.
+            if not isinstance(handle, str) or not re.fullmatch(r"[^\s/?#%\\]{1,255}", handle) or handle in {".", ".."}:
                 raise CatalogError("Invalid product handle")
             variants = [Variant(identifier(v["id"]), str(v.get("title", "")),
                                 v.get("available") is True, sku=str(v.get("sku") or ""))
@@ -90,11 +91,12 @@ class ShopifyCatalog:
                 tags = [t.strip() for t in tags.split(",")]
             images = raw.get("images") or []
             return Product(identifier(raw["id"]), handle, str(raw["title"]),
-                           f"{self.cfg.store_url}/products/{handle}", [group], variants,
+                           f"{self.cfg.store_url}/products/{quote(handle, safe='-')}", [group], variants,
                            image_url(images[0]) if images else None,
                            product_type=str(raw.get("product_type") or ""), tags=tags,
                            published_at=normalize_catalogue_time(raw.get('published_at')),
-                           created_at=normalize_catalogue_time(raw.get('created_at')))
+                           created_at=normalize_catalogue_time(raw.get('created_at')),
+                           vendor=str(raw.get('vendor') or ''))
         except (KeyError, TypeError, IndexError):
             raise CatalogError("Malformed catalogue product; scan rejected") from None
 
@@ -137,7 +139,9 @@ class ShopifyCatalog:
         if not isinstance(raw, dict) or raw.get('handle') != handle:
             raise CatalogError('Watched product identity could not be verified')
         title = str(raw.get('title', ''))
-        if re.search(r'\bRLC\b|Red Line Club', title, re.I):
+        if 'all' in self.cfg.collections:
+            group = 'all'
+        elif re.search(r'\bRLC\b|Red Line Club', title, re.I):
             group = 'rlc'
         elif re.search(r'\bPremium\b|Car Culture|Boulevard|Team Transport', title, re.I):
             group = 'premium'

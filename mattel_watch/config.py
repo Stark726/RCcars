@@ -32,6 +32,8 @@ class Config:
     launch_window_seconds: int = 300
     discovery_poll_seconds: int = 10
     baseline_recheck_seconds: int = 21600
+    summary_hour_utc: int = 13
+    health_failures_before_alert: int = 3
 
     @classmethod
     def load(cls, path: str | Path) -> "Config":
@@ -53,8 +55,10 @@ class Config:
             raise ValueError("interval_seconds must be at least 60")
         if type(self.max_pages) is not int or not 1 <= self.max_pages <= 100:
             raise ValueError("max_pages must be between 1 and 100")
-        if not self.collections or set(self.collections) - {"rlc", "premium"}:
-            raise ValueError("collections must contain rlc and/or premium")
+        if not self.collections or set(self.collections) - {"rlc", "premium", "all"}:
+            raise ValueError("collections must contain rlc, premium and/or all (the whole store)")
+        if "all" in self.collections and self.collections != {"all": "all"}:
+            raise ValueError('The whole store is configured as {"all": "all"} on its own')
         for handle in self.collections.values():
             if not isinstance(handle, str) or not re.fullmatch(r"[a-z0-9-]+", handle):
                 raise ValueError("Invalid collection handle")
@@ -68,6 +72,10 @@ class Config:
             raise ValueError('discovery_poll_seconds must be at least 10')
         if type(self.baseline_recheck_seconds) is not int or self.baseline_recheck_seconds < 1800:
             raise ValueError('baseline_recheck_seconds must be at least 1800')
+        if type(self.summary_hour_utc) is not int or not 0 <= self.summary_hour_utc <= 23:
+            raise ValueError('summary_hour_utc must be an hour from 0 to 23')
+        if type(self.health_failures_before_alert) is not int or not 1 <= self.health_failures_before_alert <= 50:
+            raise ValueError('health_failures_before_alert must be between 1 and 50')
         handles = set()
         for watch in self.launch_watches:
             if not isinstance(watch, dict) or set(watch) != {'handle', 'launch_at'}:

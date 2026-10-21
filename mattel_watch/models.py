@@ -30,6 +30,7 @@ class Product:
     ui_buyable: bool | None = None
     published_at: str | None = None
     created_at: str | None = None
+    vendor: str = ""
 
     @property
     def available(self) -> bool:
@@ -40,6 +41,8 @@ class Product:
         return self.variants[0] if len(self.variants) == 1 and self.variants[0].available else None
 
     def eligible(self) -> bool:
+        if "all" in self.groups:
+            return True  # Whole-store mode: every product is announced.
         name = self.title.casefold()
         excluded = r"\b(membership|overdrive|t-shirt|tee|hoodie|snapback|hat|apparel|poster|gift card)\b"
         if not name.startswith("hot wheels") or re.search(excluded, name):

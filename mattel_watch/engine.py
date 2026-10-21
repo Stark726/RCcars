@@ -1,12 +1,13 @@
 import logging
 from datetime import datetime, timezone
 from .catalog import CatalogError
-from .telegram import DeliveryError
+from .telegram import DeliveryError, health_message, summary_message
 from .config import launch_time
 from .launch_inspector import LaunchInspector
 from .discovery import discovery_hint
 
 log = logging.getLogger(__name__)
+REMIND_SECONDS = 600  # "Launching in 10 min" reminder lead time.
 # Inspection reasons meaning the page could not be read at all, as opposed to a readable unclear page.
 BLOCKED_REASONS = ('Verification or access challenge', 'Product document returned HTTP', 'No document response',
                    'Navigation timed out', 'Browser page inspection failed', 'Browser navigated outside')
@@ -43,8 +44,10 @@ class Engine:
                 if not p.eligible() or self.state.watched_handle(p.handle):
                     continue
                 self._process(p)
+        self.record_scan_success()
         self.scan_launches()
         self.scan_discovery()
+        self.maybe_daily_summary(summary['observed'])
         summary['active_launch_watches']=sum(not self._watch_finished(w) for w in self.state.watches())
         summary['baseline_pages_unchecked']=self.state.audit_unchecked()
         return summary
@@ -174,6 +177,8 @@ class Engine:
         window = self.cfg.launch_window_seconds
         interval = self.cfg.launch_poll_seconds if at-window <= now <= at+window else self.cfg.interval_seconds
         after = now + interval
+        if now < at-REMIND_SECONDS and watch['reminded_for'] != watch['launch_at']:
+            after = min(after, at-REMIND_SECONDS)
         if now < at-window:
             after = min(after, at-window)
         elif now < at:
@@ -216,6 +221,53 @@ class Engine:
                 self.state.bump_revision(p.id)
             self.state.update_watch(watch['handle'], after, phase)
             self._process(p, detail_ok=True, inspected=True)
+            self._maybe_remind(watch, p, now)
+
+    def _maybe_remind(self, watch, p, now):
+        at = launch_time(p.launch_at)
+        left = at.timestamp() - now
+        row = self.state.row(p.id)
+        if (not 0 < left <= REMIND_SECONDS or watch['reminded_for'] == p.launch_at
+                or row['purchase_state'] != 'pending'):
+            return
+        try:
+            self.notifier.remind(row['alert_id'] if row['alert_state'] == 'sent' else None, p, max(1, round(left / 60)))
+        except DeliveryError:
+            log.warning('Launch reminder for %s failed; it is retried on the next check', p.handle)
+        else:
+            self.state.mark_reminded(watch['handle'], p.launch_at)
+
+    def _post(self, text):
+        try:
+            self.notifier.post(text)
+            return True
+        except DeliveryError:
+            log.warning('Telegram status post failed; retried later')
+            return False
+
+    def record_scan_failure(self, reason):
+        failures = int(self.state.get_setting('health_failures') or 0) + 1
+        self.state.set_setting('health_failures', str(failures))
+        if failures >= self.cfg.health_failures_before_alert and self.state.get_setting('health_alerted') != '1':
+            if self._post(health_message(True, failures, reason)):
+                self.state.set_setting('health_alerted', '1')
+
+    def record_scan_success(self):
+        if self.state.get_setting('health_alerted') == '1' and self._post(health_message(False)):
+            self.state.set_setting('health_alerted', '0')
+        if self.state.get_setting('health_failures') not in (None, '0'):
+            self.state.set_setting('health_failures', '0')
+
+    def maybe_daily_summary(self, observed):
+        now = self.clock()
+        today = now.date().isoformat()
+        if now.hour < self.cfg.summary_hour_utc or self.state.get_setting('summary_date') == today:
+            return
+        launches = sorted((launch_time(w['launch_at']), self.state.product(w['product_id']).title)
+                          for w in self.state.watches()
+                          if w['product_id'] and not self._watch_finished(w) and launch_time(w['launch_at']) > now)
+        if self._post(summary_message(observed, self.state.daily_stats(), launches)):
+            self.state.set_setting('summary_date', today)
 
     def scan_discovery(self):
         """Audit old baseline pages in the background; new products inspect immediately."""

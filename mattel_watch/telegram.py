@@ -26,8 +26,11 @@ def message(product, purchase_state="pending", detail=""):
     status = 'Launch/timer verification pending' if product.launch_check=='unknown' else ('Scheduled release — another message follows when it is available' if future else (
         ('Waiting for site purchase control' if product.available and product.ui_buyable is False else 'Available / pre-order') if product.available else "Not available yet / sold out")
         )
-    headline = 'Launch watch' if product.launch_at else 'New Hot Wheels'
-    body = (f"🚗 <b>{headline} · {escape(' + '.join(product.groups).upper())}</b>\n"
+    hot_wheels = product.title.casefold().startswith('hot wheels')
+    headline = 'Launch watch' if product.launch_at else ('New Hot Wheels' if hot_wheels else 'New product')
+    # Whole-store products are labelled by brand (vendor) instead of the generic "ALL" collection.
+    label = product.vendor if 'all' in product.groups and product.vendor else ' + '.join(product.groups).upper()
+    body = (f"{'🚗' if hot_wheels else '🆕'} <b>{headline} · {escape(label)}</b>\n"
             f"<b>{escape(product.title[:500])}</b>\n"
             f"Price per unit: {escape(price)}\n"
             f"Status: {status}\n"
@@ -48,6 +51,35 @@ def ready_message(product, detail=""):
     if detail:
         body += "\n" + escape(detail[:1000])
     return body + f'\n<a href="{escape(product.url, quote=True)}">Open product</a>'
+
+
+def reminder_message(product, minutes):
+    at = launch_time(product.launch_at)
+    return (f"⏰ <b>Launching in {minutes} min — get ready</b>\n<b>{escape(product.title[:500])}</b>"
+            f"\nLaunch (UTC): {at.strftime('%d %b %Y %H:%M UTC')}"
+            f'\n<a href="{escape(product.url, quote=True)}">Open product</a>')
+
+
+def health_message(down, failures=0, reason=""):
+    if not down:
+        return "✅ <b>Mattel Watch is working again</b>\nCatalogue checks are succeeding; alerts are back to normal."
+    return (f"⚠️ <b>Mattel Watch can't read the store</b>\n{failures} catalogue checks failed in a row, "
+            f"so new products may be missed until this clears.\n{escape(reason[:300])}")
+
+
+def summary_message(observed, stats, launches):
+    lines = ["✅ <b>Mattel Watch daily check</b>", f"Products listed: {observed}",
+             f"New in the last 24 h: {len(stats['new'])}"]
+    lines += [f"• {escape(title[:120])}" for title in stats['new'][:8]]
+    if len(stats['new']) > 8:
+        lines.append(f"• …and {len(stats['new']) - 8} more")
+    lines.append(f"Waiting for stock or launch: {stats['waiting']}")
+    if launches:
+        lines.append("Upcoming launches (UTC):")
+        lines += [f"• {at.strftime('%d %b %H:%M')} — {escape(title[:100])}" for at, title in launches[:8]]
+    else:
+        lines.append("Upcoming launches: none known")
+    return "\n".join(lines)
 
 
 class Telegram:
@@ -94,6 +126,17 @@ class Telegram:
             payload["reply_parameters"] = {"message_id": reply_to, "allow_sending_without_reply": True}
         self._call("sendMessage", payload)
 
+    def post(self, text):
+        self._call("sendMessage", {"chat_id": self.chat_id, "text": text, "parse_mode": "HTML",
+                                   "link_preview_options": {"is_disabled": True}})
+
+    def remind(self, reply_to, product, minutes):
+        payload = {"chat_id": self.chat_id, "text": reminder_message(product, minutes), "parse_mode": "HTML",
+                   "reply_markup": {"inline_keyboard": [[{"text": "Open product", "url": product.url}]]}}
+        if reply_to:
+            payload["reply_parameters"] = {"message_id": reply_to, "allow_sending_without_reply": True}
+        self._call("sendMessage", payload)
+
     def recent_chats(self):
         """Chats and channels the bot has recently seen, so the channel ID can be copied."""
         updates = self._call("getUpdates", {"allowed_updates": ["message", "channel_post", "my_chat_member"]})
@@ -125,3 +168,9 @@ class ConsoleTelegram:
 
     def notify(self, reply_to, product, detail=""):
         print(json.dumps({"offline_available_now": reply_to, "product": product.title, "detail": detail}))
+
+    def post(self, text):
+        print(json.dumps({"offline_post": text}, ensure_ascii=False))
+
+    def remind(self, reply_to, product, minutes):
+        print(json.dumps({"offline_reminder": reply_to, "product": product.title, "minutes": minutes}))

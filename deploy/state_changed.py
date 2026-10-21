@@ -18,7 +18,7 @@ QUERIES = (
     "SELECT key, value FROM settings ORDER BY key",
     "SELECT id, baseline, alert_state, alert_id, purchase_state, detail, revision, edited_revision "
     "FROM products ORDER BY id",
-    "SELECT handle, launch_at, product_id, enabled, phase, source FROM launch_watches ORDER BY handle",
+    "SELECT handle, launch_at, product_id, enabled, phase, source, reminded_for FROM launch_watches ORDER BY handle",
 )
 
 

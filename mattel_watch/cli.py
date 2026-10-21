@@ -63,7 +63,7 @@ def demo():
 
 def main():
     parser = argparse.ArgumentParser(description='Mattel Hot Wheels RLC + Premium monitor (Canada)')
-    parser.add_argument('command', choices=['demo','scan','run','doctor','status','telegram-test','telegram-chats','watch','discover'])
+    parser.add_argument('command', choices=['demo','scan','run','doctor','status','telegram-test','telegram-chats','watch','discover','rescope'])
     parser.add_argument('--config', default='config.json')
     parser.add_argument('--console', action='store_true', help='Offline notification preview; use a separate state file')
     parser.add_argument('--product-url', help='Exact Mattel product URL for doctor, discover, status or watch')
@@ -131,6 +131,31 @@ def main():
                 raise ValueError('discover saves notification history; configure Telegram and omit --console')
             if not Path(cfg.state_path).is_file():
                 raise ValueError('Run scan first to establish the saved catalogue.')
+        if args.command == 'rescope':
+            # One-time switch to new collections (for example the whole store) without an alert flood.
+            if not Path(cfg.state_path).is_file():
+                raise ValueError('No state database yet; run scan instead.')
+            saved = State.open_readonly(cfg.state_path)
+            try:
+                current = saved.get_setting('scope')
+            finally:
+                saved.close()
+            if current == cfg.scope_key:
+                # Safe to run every time: nothing is fetched or changed once migrated.
+                print(json.dumps({'rescoped': False, 'reason': 'Already using these collections'}))
+                return
+            with process_lock(cfg.state_path + '.lock'):
+                source = ShopifyCatalog(cfg, JsonHTTP())
+                first, second = source.snapshot(), source.snapshot()
+                if {p.id for p in first} != {p.id for p in second}:
+                    raise CatalogError('Catalogue changed between reads; run rescope again')
+                state = State(cfg.state_path)
+                try:
+                    added = state.rescope(second, cfg.scope_key)
+                finally:
+                    state.close()
+            print(json.dumps({'rescoped': True, 'products_listed': len(second), 'added_without_alert': added}, indent=2))
+            return
         if args.command == 'telegram-chats':
             # Only the token is needed here; the chat ID is what this command finds.
             chats = Telegram(os.environ.get('TELEGRAM_BOT_TOKEN'), '0', JsonHTTP()).recent_chats()
@@ -163,6 +188,7 @@ def main():
                             delay = cfg.interval_seconds
                         except CatalogError as exc:
                             logging.error('%s', exc)
+                            engine.record_scan_failure(str(exc))
                             if args.command == 'scan':
                                 raise
                             delay = min(max(delay * 2, cfg.interval_seconds), 3600)

@@ -38,6 +38,10 @@ jobs:
       - name: Install Chromium
         run: python -m playwright install --with-deps chromium
 
+      # One-time switch when deploy/github-config.json changes collections; a no-op otherwise.
+      - name: Apply collection changes
+        run: python -m mattel_watch.cli rescope --config deploy/github-config.json
+
       # Runs the normal loop for about 4.5 minutes, so launch windows still get
       # 10-second checks, then stops cleanly (Ctrl+C) and saves state.
       - name: Watch
