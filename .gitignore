@@ -1,0 +1,22 @@
+.env
+.env.*
+config.json
+data/
+*.sqlite3*
+!state/state.sqlite3
+*.lock
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# Kept on this PC only; not needed by the GitHub workflow.
+README.md
+TEST_REPORT.md
+config.example.json
+pyproject.toml
+deploy/mattel-watch.service
+evidence/
+tests/

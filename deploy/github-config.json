@@ -1,0 +1,15 @@
+{
+  "store_url": "https://creations.mattel.com/en-ca",
+  "collections": {
+    "rlc": "hot-wheels-red-line-club",
+    "premium": "hot-wheels-premium"
+  },
+  "interval_seconds": 180,
+  "state_path": "state/state.sqlite3",
+  "max_pages": 20,
+  "launch_watches": [],
+  "launch_poll_seconds": 10,
+  "launch_window_seconds": 300,
+  "discovery_poll_seconds": 300,
+  "baseline_recheck_seconds": 21600
+}

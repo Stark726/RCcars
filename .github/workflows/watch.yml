@@ -1,0 +1,60 @@
+name: watch
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+# One monitor at a time; a late run waits instead of overlapping and duplicating alerts.
+concurrency:
+  group: mattel-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-checkout.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-checkout.txt
+
+      - name: Cache Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('requirements-checkout.txt') }}
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      # Runs the normal loop for about 4.5 minutes, so launch windows still get
+      # 10-second checks, then stops cleanly (Ctrl+C) and saves state.
+      - name: Watch
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: timeout --preserve-status -s INT 270 python -m mattel_watch.cli run --config deploy/github-config.json
+
+      # Saves alert history so the next run never re-alerts. Runs even after a failed watch step.
+      - name: Save state
+        if: always()
+        run: |
+          python -c "import sqlite3; db = sqlite3.connect('state/state.sqlite3'); db.execute('PRAGMA wal_checkpoint(TRUNCATE)'); db.close()"
+          git config user.name "mattel-watch-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! python deploy/state_changed.py; then exit 0; fi
+          git add state/state.sqlite3
+          if git diff --cached --quiet; then echo "No state change"; exit 0; fi
+          git commit -m "Update watch state [skip ci]"
+          git push

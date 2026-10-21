@@ -1,0 +1,3 @@
+# Optional: alerts and offline demo use Python's standard library only.
+playwright>=1.55,<2
+tzdata>=2025.2
